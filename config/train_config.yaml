@@ -1,0 +1,50 @@
+# Training Configuration for Mouth Movement Detection
+
+# Model Architecture
+model:
+  input_size: 25          # Feature vector dimension
+  hidden_size: 12         # Hidden layer neurons
+  output_size: 1          # Binary classification
+  dropout: 0.2            # Dropout probability
+
+# Training Parameters
+training:
+  batch_size: 32
+  learning_rate: 0.001
+  epochs: 50
+  early_stopping_patience: 10
+  weight_decay: 0.0001    # L2 regularization
+
+# Data Split
+data:
+  train_split: 0.7
+  val_split: 0.15
+  test_split: 0.15
+  balance_classes: true   # Balance moving/not-moving samples
+
+# Feature Extraction
+features:
+  use_mar: true           # Mouth Aspect Ratio
+  use_distances: true     # Inter-landmark distances
+  use_temporal: true      # Frame-to-frame changes
+  use_intensity: true     # Pixel intensity stats
+  use_edges: true         # Edge responses
+  temporal_window: 3      # Frames for temporal features
+
+# Facial Landmarks
+landmarks:
+  detector: "mediapipe"   # Options: "dlib", "mediapipe"
+  confidence_threshold: 0.5
+
+# Paths
+paths:
+  data_dir: "data/processed"
+  label_dir: "data/labels"
+  checkpoint_dir: "models/checkpoints"
+  log_dir: "logs"
+
+# Logging
+logging:
+  use_tensorboard: true
+  save_frequency: 5       # Save checkpoint every N epochs
+  print_frequency: 10     # Print metrics every N batches
