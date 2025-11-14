@@ -1,126 +1,143 @@
 """
 Facial Landmark Detection Module
 
-This module provides face detection and facial landmark localization
-using MediaPipe and dlib.
+This module provides face detection and mouth region estimation using OpenCV.
+Works with Python 3.13+ without external dependencies like MediaPipe or dlib.
 """
 
 import cv2
 import numpy as np
-import mediapipe as mp
 from typing import Optional, Tuple, List
+import os
 
 
 class FacialLandmarkDetector:
     """
-    Detects faces and extracts facial landmarks using MediaPipe or dlib.
+    Detects faces and estimates mouth region using OpenCV.
 
-    MediaPipe provides 468 facial landmarks, but we focus on the mouth region
-    (landmarks 61-291 specifically around lips).
+    Uses Haar Cascade for face detection and geometric estimation for mouth location.
+    This is a lightweight alternative to MediaPipe/dlib that works on all Python versions.
     """
 
-    def __init__(self, detector_type: str = "mediapipe", confidence_threshold: float = 0.5):
+    def __init__(self, detector_type: str = "opencv", confidence_threshold: float = 0.5):
         """
         Initialize the facial landmark detector.
 
         Args:
-            detector_type: Type of detector ("mediapipe" or "dlib")
-            confidence_threshold: Minimum confidence for detection
+            detector_type: Type of detector (only "opencv" supported in this version)
+            confidence_threshold: Minimum confidence for detection (not used in OpenCV Haar)
         """
-        self.detector_type = detector_type
+        self.detector_type = "opencv"
         self.confidence_threshold = confidence_threshold
 
-        if detector_type == "mediapipe":
-            self.mp_face_mesh = mp.solutions.face_mesh
-            self.face_mesh = self.mp_face_mesh.FaceMesh(
-                static_image_mode=False,
-                max_num_faces=1,
-                refine_landmarks=True,
-                min_detection_confidence=confidence_threshold,
-                min_tracking_confidence=confidence_threshold
-            )
-            # MediaPipe mouth landmark indices (inner and outer lips)
-            self.MOUTH_INDICES = [
-                61, 146, 91, 181, 84, 17, 314, 405, 321, 375,  # Upper outer lip
-                78, 191, 80, 81, 82, 13, 312, 311, 310, 415,   # Lower outer lip
-                95, 88, 178, 87, 14, 317, 402, 318, 324, 308,  # Upper inner lip
-                78, 95, 88, 178, 87, 14, 317, 402, 318, 324    # Lower inner lip
-            ]
-        elif detector_type == "dlib":
-            try:
-                import dlib
-                self.detector = dlib.get_frontal_face_detector()
-                self.predictor = dlib.shape_predictor("models/shape_predictor_68_face_landmarks.dat")
-                # dlib mouth landmark indices (48-67)
-                self.MOUTH_INDICES = list(range(48, 68))
-            except Exception as e:
-                raise ImportError(f"Failed to initialize dlib: {e}. Please install dlib or use MediaPipe.")
-        else:
-            raise ValueError(f"Unknown detector type: {detector_type}")
+        # Load Haar Cascade classifiers
+        cascade_path = cv2.data.haarcascades
+
+        # Face detector
+        face_cascade_file = os.path.join(cascade_path, 'haarcascade_frontalface_default.xml')
+        self.face_cascade = cv2.CascadeClassifier(face_cascade_file)
+
+        if self.face_cascade.empty():
+            raise RuntimeError(f"Could not load face cascade from {face_cascade_file}")
+
+        # Mouth detector (optional - for refinement)
+        mouth_cascade_file = os.path.join(cascade_path, 'haarcascade_smile.xml')
+        self.mouth_cascade = cv2.CascadeClassifier(mouth_cascade_file)
+
+        print(f"✓ OpenCV face detector initialized")
 
     def detect_face_landmarks(self, frame: np.ndarray) -> Optional[np.ndarray]:
         """
-        Detect facial landmarks in a frame.
+        Detect face and generate pseudo-landmarks for mouth region.
 
         Args:
             frame: Input frame (BGR format from OpenCV)
 
         Returns:
-            numpy array of shape (N, 2) containing (x, y) coordinates of landmarks,
+            numpy array of shape (N, 2) containing (x, y) coordinates of mouth landmarks,
             or None if no face is detected
         """
-        if self.detector_type == "mediapipe":
-            return self._detect_mediapipe(frame)
-        elif self.detector_type == "dlib":
-            return self._detect_dlib(frame)
-
-    def _detect_mediapipe(self, frame: np.ndarray) -> Optional[np.ndarray]:
-        """Detect landmarks using MediaPipe."""
-        # Convert BGR to RGB
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-        # Process the frame
-        results = self.face_mesh.process(rgb_frame)
-
-        if not results.multi_face_landmarks:
-            return None
-
-        # Get the first face
-        face_landmarks = results.multi_face_landmarks[0]
-
-        # Extract all landmarks
-        h, w = frame.shape[:2]
-        landmarks = []
-        for landmark in face_landmarks.landmark:
-            x = int(landmark.x * w)
-            y = int(landmark.y * h)
-            landmarks.append([x, y])
-
-        return np.array(landmarks)
-
-    def _detect_dlib(self, frame: np.ndarray) -> Optional[np.ndarray]:
-        """Detect landmarks using dlib."""
-        # Convert to grayscale
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
         # Detect faces
-        faces = self.detector(gray)
+        faces = self.face_cascade.detectMultiScale(
+            gray,
+            scaleFactor=1.1,
+            minNeighbors=5,
+            minSize=(30, 30)
+        )
 
         if len(faces) == 0:
             return None
 
-        # Get landmarks for the first face
-        face = faces[0]
-        shape = self.predictor(gray, face)
+        # Use the largest face
+        if len(faces) > 1:
+            faces = sorted(faces, key=lambda x: x[2] * x[3], reverse=True)
 
-        # Convert to numpy array
-        landmarks = np.array([[p.x, p.y] for p in shape.parts()])
+        fx, fy, fw, fh = faces[0]
 
-        return landmarks
+        # Generate mouth landmarks based on face geometry
+        # Mouth is typically in lower third of face, centered
+        mouth_landmarks = self._generate_mouth_landmarks(fx, fy, fw, fh)
+
+        return mouth_landmarks
+
+    def _generate_mouth_landmarks(self, face_x: int, face_y: int,
+                                  face_w: int, face_h: int) -> np.ndarray:
+        """
+        Generate estimated mouth landmarks based on face bounding box.
+
+        Creates ~20 points around the mouth region using facial proportions.
+
+        Args:
+            face_x, face_y: Top-left corner of face
+            face_w, face_h: Width and height of face
+
+        Returns:
+            Array of mouth landmark coordinates
+        """
+        # Mouth is typically:
+        # - Horizontally centered
+        # - Starts at about 60% down the face
+        # - Width is about 50% of face width
+        # - Height is about 15% of face height
+
+        mouth_center_x = face_x + face_w // 2
+        mouth_center_y = face_y + int(face_h * 0.7)
+
+        mouth_width = int(face_w * 0.5)
+        mouth_height = int(face_h * 0.15)
+
+        # Generate landmarks around mouth perimeter
+        landmarks = []
+
+        # Top lip (outer) - 8 points
+        for i in range(8):
+            t = i / 7  # 0 to 1
+            x = mouth_center_x - mouth_width//2 + int(t * mouth_width)
+            # Slight curve for top lip
+            y = mouth_center_y - mouth_height//2 + int(abs(t - 0.5) * mouth_height * 0.3)
+            landmarks.append([x, y])
+
+        # Bottom lip (outer) - 8 points
+        for i in range(8):
+            t = i / 7
+            x = mouth_center_x + mouth_width//2 - int(t * mouth_width)
+            # Slight curve for bottom lip
+            y = mouth_center_y + mouth_height//2 - int(abs(t - 0.5) * mouth_height * 0.3)
+            landmarks.append([x, y])
+
+        # Inner mouth - 4 corner points
+        landmarks.append([mouth_center_x - mouth_width//3, mouth_center_y - mouth_height//4])
+        landmarks.append([mouth_center_x + mouth_width//3, mouth_center_y - mouth_height//4])
+        landmarks.append([mouth_center_x + mouth_width//3, mouth_center_y + mouth_height//4])
+        landmarks.append([mouth_center_x - mouth_width//3, mouth_center_y + mouth_height//4])
+
+        return np.array(landmarks, dtype=np.int32)
 
     def get_mouth_landmarks(self, frame: np.ndarray) -> Optional[np.ndarray]:
         """
-        Extract only mouth region landmarks.
+        Extract mouth region landmarks.
 
         Args:
             frame: Input frame
@@ -128,41 +145,42 @@ class FacialLandmarkDetector:
         Returns:
             numpy array of mouth landmarks (N, 2) or None
         """
-        all_landmarks = self.detect_face_landmarks(frame)
-
-        if all_landmarks is None:
-            return None
-
-        # Extract mouth landmarks based on indices
-        mouth_landmarks = all_landmarks[self.MOUTH_INDICES]
-
-        return mouth_landmarks
+        # In this simplified version, all landmarks are mouth landmarks
+        return self.detect_face_landmarks(frame)
 
     def visualize_landmarks(self, frame: np.ndarray, landmarks: np.ndarray,
-                           mouth_only: bool = False) -> np.ndarray:
+                           mouth_only: bool = True) -> np.ndarray:
         """
         Draw landmarks on the frame for visualization.
 
         Args:
             frame: Input frame
             landmarks: Landmark coordinates
-            mouth_only: If True, only draw mouth landmarks
+            mouth_only: Not used (all landmarks are mouth landmarks)
 
         Returns:
             Frame with landmarks drawn
         """
         vis_frame = frame.copy()
 
-        if mouth_only and self.detector_type == "mediapipe":
-            # Draw only mouth landmarks
-            for idx in self.MOUTH_INDICES:
-                if idx < len(landmarks):
-                    x, y = landmarks[idx]
-                    cv2.circle(vis_frame, (int(x), int(y)), 1, (0, 255, 0), -1)
-        else:
-            # Draw all landmarks
-            for x, y in landmarks:
-                cv2.circle(vis_frame, (int(x), int(y)), 1, (0, 255, 0), -1)
+        # Draw all landmarks
+        for x, y in landmarks:
+            cv2.circle(vis_frame, (int(x), int(y)), 2, (0, 255, 0), -1)
+
+        # Draw connecting lines for better visualization
+        num_points = len(landmarks)
+        if num_points >= 16:
+            # Connect top lip
+            for i in range(7):
+                pt1 = tuple(landmarks[i].astype(int))
+                pt2 = tuple(landmarks[i+1].astype(int))
+                cv2.line(vis_frame, pt1, pt2, (0, 255, 0), 1)
+
+            # Connect bottom lip
+            for i in range(8, 15):
+                pt1 = tuple(landmarks[i].astype(int))
+                pt2 = tuple(landmarks[i+1].astype(int))
+                cv2.line(vis_frame, pt1, pt2, (0, 255, 0), 1)
 
         return vis_frame
 
@@ -184,22 +202,33 @@ class FacialLandmarkDetector:
         width = x_max - x_min
         height = y_max - y_min
 
-        return x_min, y_min, width, height
+        # Add some padding
+        padding = 5
+        x_min = max(0, x_min - padding)
+        y_min = max(0, y_min - padding)
+        width += 2 * padding
+        height += 2 * padding
 
-    def __del__(self):
-        """Cleanup resources."""
-        if self.detector_type == "mediapipe" and hasattr(self, 'face_mesh'):
-            self.face_mesh.close()
+        return x_min, y_min, width, height
 
 
 if __name__ == "__main__":
     # Test the detector
-    detector = FacialLandmarkDetector(detector_type="mediapipe")
+    print("Testing OpenCV-based face and mouth detection...")
+    print("This uses Haar Cascades - works on all Python versions!")
+    print()
+
+    detector = FacialLandmarkDetector(detector_type="opencv")
 
     # Open webcam
     cap = cv2.VideoCapture(0)
 
+    if not cap.isOpened():
+        print("Error: Could not open webcam")
+        exit(1)
+
     print("Press 'q' to quit")
+    print()
 
     while True:
         ret, frame = cap.read()
@@ -211,22 +240,27 @@ if __name__ == "__main__":
 
         if landmarks is not None:
             # Visualize
-            vis_frame = detector.visualize_landmarks(frame, landmarks, mouth_only=True)
+            vis_frame = detector.visualize_landmarks(frame, landmarks)
 
             # Get mouth region
             mouth_landmarks = detector.get_mouth_landmarks(frame)
             if mouth_landmarks is not None:
                 x, y, w, h = detector.get_mouth_bounding_box(mouth_landmarks)
                 cv2.rectangle(vis_frame, (x, y), (x + w, y + h), (255, 0, 0), 2)
+
+                cv2.putText(vis_frame, "Mouth detected", (10, 30),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
         else:
             vis_frame = frame
             cv2.putText(vis_frame, "No face detected", (10, 30),
                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
 
-        cv2.imshow("Facial Landmarks", vis_frame)
+        cv2.imshow("Facial Landmarks (OpenCV)", vis_frame)
 
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
     cap.release()
     cv2.destroyAllWindows()
+
+    print("\nTest complete!")

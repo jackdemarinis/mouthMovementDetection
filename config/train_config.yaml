@@ -1,10 +1,10 @@
-# Training Configuration for Mouth Movement Detection
+# Training Configuration for Speech/Talking Detection
 
 # Model Architecture
 model:
-  input_size: 25          # Feature vector dimension
+  input_size: 35          # Feature vector dimension (updated from 25 for speech detection)
   hidden_size: 12         # Hidden layer neurons
-  output_size: 1          # Binary classification
+  output_size: 1          # Binary classification (1=talking, 0=not talking)
   dropout: 0.2            # Dropout probability
 
 # Training Parameters
@@ -20,25 +20,25 @@ data:
   train_split: 0.7
   val_split: 0.15
   test_split: 0.15
-  balance_classes: true   # Balance moving/not-moving samples
+  balance_classes: true   # Balance talking/not-talking samples
 
 # Feature Extraction
 features:
   use_mar: true           # Mouth Aspect Ratio
   use_distances: true     # Inter-landmark distances
-  use_temporal: true      # Frame-to-frame changes
+  use_temporal: true      # Speech-specific temporal features
   use_intensity: true     # Pixel intensity stats
   use_edges: true         # Edge responses
-  temporal_window: 3      # Frames for temporal features
+  temporal_window: 15     # Frames for temporal features (increased from 3 to 15 for speech patterns, ~0.5s at 30fps)
 
 # Facial Landmarks
 landmarks:
-  detector: "mediapipe"   # Options: "dlib", "mediapipe"
+  detector: "opencv"   # Using OpenCV Haar Cascades (Python 3.13 compatible)
   confidence_threshold: 0.5
 
 # Paths
 paths:
-  data_dir: "data/processed"
+  data_dir: "data/raw"  # Directory containing session folders
   label_dir: "data/labels"
   checkpoint_dir: "models/checkpoints"
   log_dir: "logs"

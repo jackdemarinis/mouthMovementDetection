@@ -1,27 +1,30 @@
-# Lightweight Neural Network for Real-Time Mouth Movement Detection
+# Lightweight Neural Network for Real-Time Speech/Talking Detection
 
-A PyTorch-based binary classification system that detects whether a person's mouth is moving in real-time video, achieving >90% accuracy with minimal computational overhead (30+ fps on CPU).
+A PyTorch-based binary classification system that detects when a person is **actively speaking/talking** in real-time video, achieving >90% accuracy with minimal computational overhead (30+ fps on CPU).
 
 ## 🎯 Project Overview
 
-This project implements a feedforward neural network for real-time mouth movement detection, designed to enhance speech-to-text systems by identifying active speakers in multi-person environments. The lightweight architecture ensures real-time performance suitable for video conferencing, automated transcription, and accessibility applications.
+This project implements a feedforward neural network for real-time **speech/talking detection** (not just general mouth movement), designed to enhance speech-to-text systems by identifying active speakers in multi-person environments. The system uses speech-specific features to distinguish talking from other mouth movements like chewing, yawning, or facial expressions.
 
 ### Key Features
 
-- **Binary Classification**: Distinguishes between moving (speaking) and non-moving mouths
+- **Speech-Specific Detection**: Distinguishes talking/speaking from other mouth movements (VISUAL-ONLY)
+- **Binary Classification**: Talking vs. Not Talking (1 = speaking, 0 = silent)
 - **Real-Time Performance**: Achieves 30+ fps on standard CPU hardware
 - **High Accuracy**: Targets >90% classification accuracy
+- **Speech-Optimized Features**: Periodicity, rhythm, velocity, and temporal patterns
+- **Visual-Only System**: No audio input required - pure computer vision approach
 - **Robust**: Works across varied lighting conditions, head poses, and speaker characteristics
 - **Lightweight**: Optimized feedforward network with minimal computational overhead
 
 ## 📋 Project Objectives
 
-1. ✅ Design a feedforward neural network for binary mouth state classification
-2. ✅ Extract discriminative facial features from video frames
+1. ✅ Design a feedforward neural network for binary speech/talking detection
+2. ✅ Extract speech-specific features from facial landmarks and temporal patterns
 3. ✅ Achieve ≥90% classification accuracy on test data
 4. ✅ Optimize for real-time performance (≥30 fps inference)
-5. ✅ Evaluate robustness across varied conditions
-6. ✅ Minimize false positives from non-speech movements
+5. ✅ Distinguish speech from non-speech mouth movements (chewing, yawning, etc.) using visual features only
+6. ✅ Evaluate robustness across varied conditions
 
 ## 🏗️ System Architecture
 
@@ -35,16 +38,21 @@ Video Input → Face Detection & Landmarks → Feature Extraction → Neural Net
 
 1. **Video Input & Preprocessing**: 30+ fps capture with grayscale conversion
 2. **Face Detection & Landmark Localization**: 68-point facial landmarks using dlib/MediaPipe
-3. **Feature Extraction**:
-   - Mouth Aspect Ratio (MAR)
-   - Inter-landmark distances
-   - Temporal derivatives (frame-to-frame changes)
-   - Pixel intensity statistics
-   - Edge responses
+3. **Feature Extraction** (35-dimensional speech-optimized features):
+   - Mouth Aspect Ratio (MAR): 1 feature
+   - Inter-landmark distances: 10 features
+   - **Speech-specific temporal features**: 20 features
+     - Movement velocity & acceleration
+     - MAR periodicity & rhythm patterns
+     - Zero-crossing rate (syllable detection)
+     - Movement consistency & regularity
+     - Peak detection (mouth opening cycles)
+   - Pixel intensity statistics: 2 features
+   - Edge responses: 2 features
 4. **Neural Network Classification**:
-   - Input: 20-30 dimensional feature vector
-   - Hidden: 10-15 neurons with activation
-   - Output: Binary classification (moving/not moving)
+   - Input: 35 dimensional feature vector (optimized for speech)
+   - Hidden: 12 neurons with ReLU activation + Dropout(0.2)
+   - Output: Binary classification (talking/not talking)
 
 ## 🚀 Getting Started
 
@@ -85,9 +93,14 @@ Video Input → Face Detection & Landmarks → Feature Extraction → Neural Net
    python src/data_processing/collect_data.py --duration 300 --output data/raw
    ```
 
-2. **Process and label data**
+2. **Label data (manual labeling - RECOMMENDED)**
    ```bash
-   python src/data_processing/label_data.py --input data/raw --output data/processed
+   python src/data_processing/label_data.py --session data/raw/session_001 --mode manual
+   ```
+
+   Or auto-labeling (not recommended - cannot distinguish speech from other movements):
+   ```bash
+   python src/data_processing/label_data.py --session data/raw/session_001 --mode auto
    ```
 
 3. **Train the model**
@@ -148,8 +161,10 @@ Mouth-Movement-Detection/
 The system can use multiple data sources:
 
 1. **Custom Webcam Collection**: Record yourself speaking and silent
+   - IMPORTANT: Record clear examples of TALKING vs. NOT TALKING
+   - Include non-speech mouth movements (chewing, yawning) labeled as "NOT TALKING"
 2. **Public Datasets**: VoxCeleb2, GRID Corpus, LRS2 (if available)
-3. **Automatic Labeling**: Uses audio energy detection for ground truth
+   - Useful for diverse speakers and conditions
 
 ### Training Configuration
 
@@ -157,15 +172,18 @@ Edit `config/train_config.yaml` to customize:
 
 ```yaml
 model:
-  input_size: 25
-  hidden_size: 12
-  output_size: 1
+  input_size: 35          # Feature vector dimension (speech-optimized)
+  hidden_size: 12         # Hidden layer neurons
+  output_size: 1          # Binary classification (1=talking, 0=not talking)
 
 training:
   batch_size: 32
   learning_rate: 0.001
   epochs: 50
   early_stopping_patience: 10
+
+features:
+  temporal_window: 15     # 15 frames (~0.5s at 30fps) for speech patterns
 
 data:
   train_split: 0.7
@@ -224,17 +242,31 @@ python src/inference.py --model models/checkpoints/best_model.pth --camera 0
 ### Data Labeling
 
 Ground truth labels are generated through:
-- Audio energy detection (automatic)
-- Manual annotation tool (for validation)
-- Temporal smoothing to reduce noise
+
+1. **Manual Annotation** (RECOMMENDED for speech detection):
+   ```bash
+   python src/data_processing/label_data.py --session data/raw/session_001 --mode manual
+   ```
+   - Frame-by-frame GUI annotation
+   - Label '1' ONLY for actual SPEECH/TALKING
+   - Label '0' for silent frames AND non-speech movements (chewing, yawning, etc.)
+   - Most accurate method for distinguishing speech from other mouth movements
+
+2. **Feature-Based Auto-Labeling** (fallback, not recommended):
+   ```bash
+   python src/data_processing/label_data.py --session data/raw/session_001 --mode auto
+   ```
+   - Uses temporal variance to detect mouth movement
+   - Cannot distinguish speech from other movements
+   - Requires manual review and correction
 
 ## 🔬 Technical Details
 
 ### Neural Network Architecture
 
 ```python
-MouthMovementNet(
-  Input Layer: 25 neurons
+SpeechDetectionNet(
+  Input Layer: 35 neurons (speech-optimized features)
   Hidden Layer: 12 neurons + ReLU activation + Dropout(0.2)
   Output Layer: 1 neuron + Sigmoid activation
 )
@@ -243,13 +275,23 @@ MouthMovementNet(
 - **Loss Function**: Binary Cross-Entropy
 - **Optimizer**: Adam (lr=0.001)
 - **Regularization**: Dropout + Early Stopping
+- **Temporal Window**: 15 frames (~0.5s at 30fps) for speech pattern analysis
 
-### Feature Vector (25 dimensions)
+### Feature Vector (35 dimensions - Speech-Optimized)
 
+**Basic Mouth Features (13 features):**
 - Mouth Aspect Ratio (MAR): 1
 - Inter-landmark distances: 10
-- Temporal derivatives: 10
 - Intensity statistics: 2
+
+**Speech-Specific Temporal Features (20 features):**
+- Basic motion: 5 (displacement, velocity in X/Y)
+- Velocity & acceleration: 3
+- MAR periodicity & rhythm: 5 (variance, range, rate of change, zero-crossing rate)
+- Movement consistency: 4 (mean, std, coefficient of variation, sustained ratio)
+- Frequency domain: 3 (peak rate, peak amplitude patterns)
+
+**Visual Features (2 features):**
 - Edge responses: 2
 
 ## 🛠️ Development
@@ -278,13 +320,28 @@ flake8 src/
 | Inference Time | TBD |
 | FPS | TBD |
 
+## 🔑 Key Differences: Speech Detection vs. General Mouth Movement
+
+This system is designed to detect **SPEECH/TALKING**, not just any mouth movement:
+
+| Feature | General Mouth Movement | Speech Detection (This System) |
+|---------|----------------------|-------------------------------|
+| **Detection Target** | Any mouth opening/closing | Specifically talking/speaking (visual-only) |
+| **Temporal Window** | 3 frames (~100ms) | 15 frames (~500ms) for speech rhythm |
+| **Features** | 25 basic features | 35 speech-optimized features |
+| **Key Signals** | MAR, basic motion | Periodicity, rhythm, velocity patterns |
+| **Labeling** | Visual observation | Manual labeling of speech vs. non-speech movements |
+| **False Positives** | Chewing, yawning counted as "moving" | Trained to distinguish speech from non-speech movements |
+
 ## 🚧 Future Extensions
 
 - [ ] Integration with speech-to-text systems
-- [ ] Multi-class classification (speech intensity levels)
-- [ ] Recurrent architectures (LSTM/GRU)
+- [ ] Multi-class classification (speech intensity levels, whisper vs. normal)
+- [ ] Recurrent architectures (LSTM/GRU) for better temporal modeling
+- [ ] Multi-modal fusion (visual + audio features)
 - [ ] Edge deployment (mobile/embedded devices)
 - [ ] Active learning with user feedback
+- [ ] Multi-language speech pattern adaptation
 
 ## 📚 References
 

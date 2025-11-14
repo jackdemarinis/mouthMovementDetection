@@ -1,7 +1,8 @@
 """
 Data Labeling Script
 
-Generates binary labels for collected data based on audio activity or manual annotation.
+Generates binary labels for collected data through manual annotation.
+Labels indicate TALKING/SPEAKING (not just general mouth movement).
 """
 
 import numpy as np
@@ -9,17 +10,24 @@ import argparse
 import os
 import json
 import cv2
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
 
 class DataLabeler:
     """
-    Labels mouth movement data for training.
+    Labels speech/talking data for training (VISUAL-ONLY).
 
     Supports:
-    - Manual labeling through GUI
-    - Auto-labeling based on temporal patterns
+    - Manual labeling through GUI (RECOMMENDED)
+    - Auto-labeling based on temporal patterns (fallback)
     - Label smoothing and validation
+
+    Labels:
+    - 1 = TALKING/SPEAKING
+    - 0 = NOT TALKING (silent or non-speech mouth movement)
+
+    IMPORTANT: This is a VISUAL-ONLY system. Labels must be based on visual
+    observation of speech, not audio.
     """
 
     def __init__(self, data_dir: str):
@@ -58,12 +66,14 @@ class DataLabeler:
         print(f"Session: {session_dir}")
         print(f"Frames: {len(frame_files)}")
         print("\nControls:")
-        print("  '1' or '→' - Label as MOVING (speaking)")
-        print("  '0' or '←' - Label as NOT MOVING (silent)")
+        print("  '1' or '→' - Label as TALKING/SPEAKING")
+        print("  '0' or '←' - Label as NOT TALKING (silent)")
         print("  'SPACE' - Toggle label")
         print("  's' - Save and continue")
         print("  'q' - Save and quit")
         print("  'b' - Go back to previous frame")
+        print("\nIMPORTANT: Label '1' only when actually SPEAKING,")
+        print("           not for other mouth movements like yawning or chewing!")
         print("="*60 + "\n")
 
         # Initialize labels (if existing labels, load them)
@@ -97,10 +107,10 @@ class DataLabeler:
             # Show current label
             current_label = self.current_labels[self.current_frame_idx]
             if current_label == 1:
-                label_text = "MOVING"
+                label_text = "TALKING"
                 label_color = (0, 255, 0)
             elif current_label == 0:
-                label_text = "NOT MOVING"
+                label_text = "NOT TALKING"
                 label_color = (0, 0, 255)
             else:
                 label_text = "UNLABELED"
@@ -127,12 +137,12 @@ class DataLabeler:
 
             if key == ord('1') or key == 83:  # '1' or right arrow
                 self.current_labels[self.current_frame_idx] = 1
-                print(f"Frame {self.current_frame_idx}: MOVING")
+                print(f"Frame {self.current_frame_idx}: TALKING")
                 self.current_frame_idx += 1
 
             elif key == ord('0') or key == 81:  # '0' or left arrow
                 self.current_labels[self.current_frame_idx] = 0
-                print(f"Frame {self.current_frame_idx}: NOT MOVING")
+                print(f"Frame {self.current_frame_idx}: NOT TALKING")
                 self.current_frame_idx += 1
 
             elif key == ord(' '):  # Space - toggle
@@ -173,6 +183,9 @@ class DataLabeler:
                                  threshold_percentile: float = 60):
         """
         Automatically label frames based on feature variance.
+
+        WARNING: This method cannot reliably distinguish speech from other mouth movements!
+        Manual labeling is STRONGLY RECOMMENDED for accurate speech detection.
 
         Frames with high temporal variance in features are likely "moving".
 
@@ -216,10 +229,12 @@ class DataLabeler:
         print("\n" + "="*60)
         print(f"Auto-labeling complete!")
         print(f"Total frames: {len(labels)}")
-        print(f"Moving: {np.sum(labels == 1)} ({np.mean(labels) * 100:.1f}%)")
-        print(f"Not moving: {np.sum(labels == 0)} ({(1 - np.mean(labels)) * 100:.1f}%)")
+        print(f"Talking: {np.sum(labels == 1)} ({np.mean(labels) * 100:.1f}%)")
+        print(f"Not talking: {np.sum(labels == 0)} ({(1 - np.mean(labels)) * 100:.1f}%)")
         print(f"Threshold: {threshold:.3f}")
         print(f"Labels saved to: {output_path}")
+        print("\nWARNING: Auto-labeling cannot distinguish speech from other movements!")
+        print("Please review and correct labels manually for best accuracy.")
         print("="*60 + "\n")
 
     def _smooth_labels(self, labels: np.ndarray, window_size: int = 3) -> np.ndarray:
@@ -255,8 +270,8 @@ class DataLabeler:
         label_dict = {
             "labels": self.current_labels,
             "num_frames": len(self.current_labels),
-            "num_moving": int(np.sum(np.array(self.current_labels) == 1)),
-            "num_not_moving": int(np.sum(np.array(self.current_labels) == 0)),
+            "num_talking": int(np.sum(np.array(self.current_labels) == 1)),
+            "num_not_talking": int(np.sum(np.array(self.current_labels) == 0)),
             "num_unlabeled": int(np.sum(np.array(self.current_labels) == -1))
         }
 
@@ -265,15 +280,15 @@ class DataLabeler:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Label mouth movement data")
+    parser = argparse.ArgumentParser(description="Label speech/talking data (VISUAL-ONLY)")
     parser.add_argument("--session", type=str, required=True,
                        help="Session directory to label")
     parser.add_argument("--mode", type=str, choices=["manual", "auto"], default="manual",
-                       help="Labeling mode: manual or auto")
+                       help="Labeling mode: manual (recommended) or auto (fallback)")
     parser.add_argument("--output", type=str, default=None,
                        help="Output path for labels (default: session_dir/labels.npy)")
     parser.add_argument("--threshold", type=float, default=60,
-                       help="Threshold percentile for auto-labeling (default: 60)")
+                       help="Threshold percentile for feature-based auto-labeling (default: 60)")
 
     args = parser.parse_args()
 
@@ -282,6 +297,8 @@ def main():
     if args.mode == "manual":
         labeler.manual_labeling(args.session, args.output)
     elif args.mode == "auto":
+        print("\nWARNING: Auto-labeling mode cannot distinguish speech from other movements!")
+        print("Manual labeling is STRONGLY recommended for accurate speech detection.\n")
         labeler.auto_label_from_features(args.session, args.output, args.threshold)
 
 

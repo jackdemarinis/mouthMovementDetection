@@ -1,7 +1,8 @@
 """
-Real-Time Mouth Movement Detection Inference
+Real-Time Speech/Talking Detection Inference
 
-Runs the trained model on webcam feed for real-time mouth movement detection.
+Runs the trained model on webcam feed for real-time speech/talking detection.
+Detects when the user is TALKING/SPEAKING, not just general mouth movement.
 """
 
 import torch
@@ -22,9 +23,14 @@ from features.mouth_features import MouthFeatureExtractor
 from models.network import create_model
 
 
-class MouthMovementInference:
+class SpeechDetectionInference:
     """
-    Real-time mouth movement detection using trained model.
+    Real-time speech/talking detection using trained model.
+
+    Detects when user is actively TALKING/SPEAKING based on:
+    - Mouth movement patterns
+    - Speech-specific temporal features
+    - Rhythmic lip movements characteristic of speech
     """
 
     def __init__(self, model_path: str, scaler_path: str = None,
@@ -43,7 +49,7 @@ class MouthMovementInference:
 
         # Load model
         print(f"Loading model from {model_path}")
-        checkpoint = torch.load(model_path, map_location=self.device)
+        checkpoint = torch.load(model_path, map_location=self.device, weights_only=False)
 
         # Get model configuration
         config = checkpoint.get('config', {})
@@ -134,9 +140,11 @@ class MouthMovementInference:
             return
 
         print("\n" + "="*60)
-        print("REAL-TIME MOUTH MOVEMENT DETECTION")
+        print("REAL-TIME SPEECH/TALKING DETECTION")
         print("="*60)
-        print("Controls:")
+        print("Detects when you are TALKING/SPEAKING")
+        print("(Not just general mouth movement)")
+        print("\nControls:")
         print("  'q' - Quit")
         print("  's' - Save screenshot")
         print("  'r' - Reset temporal history")
@@ -183,7 +191,7 @@ class MouthMovementInference:
                 cv2.rectangle(display, (x, y), (x + w, y + h), box_color, 2)
 
                 # Display prediction
-                label = "MOVING" if prediction == 1 else "NOT MOVING"
+                label = "TALKING" if prediction == 1 else "NOT TALKING"
                 label_color = (0, 255, 0) if prediction == 1 else (0, 0, 255)
 
                 # Background for text
@@ -233,7 +241,7 @@ class MouthMovementInference:
                 cv2.putText(display, inference_text, (display.shape[1] - 200, 60),
                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
-            cv2.imshow("Mouth Movement Detection", display)
+            cv2.imshow("Speech/Talking Detection", display)
 
             # Handle keys
             key = cv2.waitKey(1) & 0xFF
@@ -270,7 +278,7 @@ class MouthMovementInference:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Real-time mouth movement detection")
+    parser = argparse.ArgumentParser(description="Real-time speech/talking detection")
     parser.add_argument("--model", type=str, required=True,
                        help="Path to trained model checkpoint")
     parser.add_argument("--scaler", type=str, default=None,
@@ -278,7 +286,7 @@ def main():
     parser.add_argument("--camera", type=int, default=0,
                        help="Camera device ID")
     parser.add_argument("--threshold", type=float, default=0.5,
-                       help="Classification threshold")
+                       help="Classification threshold (higher = more strict)")
     parser.add_argument("--device", type=str, default="cpu",
                        choices=["cpu", "cuda"],
                        help="Device to run inference on")
@@ -290,7 +298,7 @@ def main():
     args = parser.parse_args()
 
     # Create inference system
-    inference = MouthMovementInference(
+    inference = SpeechDetectionInference(
         model_path=args.model,
         scaler_path=args.scaler,
         device=args.device,
