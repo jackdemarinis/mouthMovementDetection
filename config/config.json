@@ -1,0 +1,22 @@
+{
+  "mode": "train",
+  "backend": "mediapipe",
+  "metadata": "data/metadata.csv",
+  "predictor": "models/shape_predictor_68_face_landmarks.dat",
+  "hidden_dim": 12,
+  "lr": 0.05,
+  "epochs": 200,
+  "batch_size": 32,
+  "artifacts": "artifacts",
+  "model_path": "artifacts/mouth_movement_nn.npz",
+  "scaler_path": "artifacts/feature_scaler.npy",
+  "source": "0",
+  "threshold": 0.5,
+  "smooth": 5,
+  "pos_weight": 1.5,
+  "capture_out_dir": "data/frames",
+  "capture_metadata": "data/metadata.csv",
+  "capture_source": "0",
+  "capture_every": 3,
+  "capture_sleep": 0.05
+}
